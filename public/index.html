@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coding Agent as Policy &middot; TurboPi Sim</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/vendor/three/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="app">
+      <section class="scene-shell">
+        <canvas id="scene"></canvas>
+
+        <div class="hud top-left">
+          <div class="title">Coding Agent as Policy</div>
+          <div class="subtitle">Session 8 &middot; TurboPi sim</div>
+        </div>
+
+        <div class="hud top-right">
+          <div class="camera-switch" role="group" aria-label="Active camera">
+            <button data-camera="top_down" class="active">Top-down</button>
+            <button data-camera="chase">Chase</button>
+            <button data-camera="front">Front</button>
+          </div>
+        </div>
+
+        <div class="camera-feed-overlay">
+          <div class="label">Agent's view (<span id="activeCameraLabel">top-down</span>)</div>
+          <canvas id="agentCamera"></canvas>
+        </div>
+
+        <div id="motionBadge" class="motion-badge">Car moving</div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-header">
+          <p class="kicker">Coding agent as policy</p>
+          <h1>Language to motor commands, via Claude Code</h1>
+          <div class="sub">Type a task. Click Send. A Claude Code agent (running in a sister terminal) reads the active camera and writes motor commands back through the HTTP API.</div>
+        </div>
+
+        <details class="guide" open>
+          <summary>How this works (read me first)</summary>
+          <ol class="guide-steps">
+            <li><strong>Forget calibration.</strong> Clears every skill file so the agent starts from nothing. Watch the working directory below empty out.</li>
+            <li><strong>Calibrate.</strong> Pick the Calibrate stage and Send. The agent runs trial motor commands, learns the <code>vx, vy, omega</code> mapping and how to avoid obstacles for each camera, and writes one skill file per camera.</li>
+            <li><strong>Open a skill file.</strong> The files appear in the working directory below. Click one to read what the agent learned.</li>
+            <li><strong>Execute.</strong> Switch to the Execute stage and Send. The agent drives to the green goal, avoiding obstacles.</li>
+            <li><strong>Move things.</strong> Randomize the goal, car, or obstacles. The agent keeps driving to the goal on its own, no new instruction needed.</li>
+          </ol>
+          <p class="guide-note">The agent only sees the HTTP API, never the simulator source. <strong>Reset</strong> just repositions the car; <strong>Forget calibration</strong> deletes the learned skill files.</p>
+        </details>
+
+        <div class="agent-status" id="agentStatus">
+          <div class="status-line">
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-text" id="statusText">Waiting for an instruction</span>
+            <span class="status-stage" id="statusStage">CALIBRATE</span>
+          </div>
+          <div class="status-sub" id="statusSub">Car stopped. Send an instruction to the agent.</div>
+        </div>
+
+        <div class="calib-status" id="calibStatus">
+          <span class="calib-label">Calibration</span>
+          <span class="calib-pill" data-camera="top_down">top-down</span>
+          <span class="calib-pill" data-camera="chase">chase</span>
+          <span class="calib-pill" data-camera="front">front</span>
+        </div>
+
+        <label>Scene controls</label>
+        <div class="scene-controls">
+          <button id="randomCarBtn">Randomize car</button>
+          <button id="randomGoalBtn">Randomize goal</button>
+          <button id="randomObstaclesBtn">Randomize obstacles</button>
+          <button id="forgetCalibrationBtn">Forget calibration</button>
+          <button id="resetBtn">Reset</button>
+        </div>
+
+        <label>Stage</label>
+        <div class="mode-toggle" role="group" aria-label="Stage">
+          <button id="stageCalibrate" class="active" data-stage="calibrate">1. Calibrate</button>
+          <button id="stageExecute" data-stage="execute">2. Execute</button>
+        </div>
+        <p class="hint" id="stageHint">
+          The agent should run trial motor commands and observe the camera to learn the mapping from <code>vx, vy, omega</code> to pixel displacement.
+        </p>
+
+        <label for="instruction">
+          Instruction to Claude Code
+          <span class="auto-note">loads automatically with the stage</span>
+        </label>
+        <textarea id="instruction" spellcheck="false"></textarea>
+
+        <button id="sendBtn" class="primary">Send to Claude Code</button>
+
+        <label>Execution log</label>
+        <ol id="log" class="log"></ol>
+
+        <div class="workdir" id="workdir">
+          <div class="workdir-head">
+            <span class="workdir-title">Agent working directory</span>
+            <code class="workdir-path">calibration/</code>
+          </div>
+          <p class="workdir-hint">
+            The skill files the agent writes during calibration appear here. Click one to read it.
+            When you <strong>Forget calibration</strong>, these files are deleted and the agent calibrates from scratch.
+          </p>
+          <ul class="file-list" id="calibFiles">
+            <li class="file-empty">No calibration files yet. Run the Calibrate stage.</li>
+          </ul>
+          <pre class="file-view" id="calibFileView" hidden></pre>
+        </div>
+
+        <details class="api">
+          <summary>What the agent can access (HTTP API only)</summary>
+          <p class="api-note">
+            The agent gets <strong>only</strong> these HTTP endpoints. It cannot read or change the
+            simulator source, so it cannot move the car directly through JavaScript. It must learn the
+            car by experiment, exactly like a real robot.
+          </p>
+          <pre><code>GET  /api/instruction        &rarr; { instruction, stage, activeCamera, ... }
+GET  /api/camera             &rarr; PNG (active camera view)
+GET  /api/camera?view=front  &rarr; PNG (a specific camera)
+POST /api/camera  { camera } &rarr; switch the active camera
+GET  /api/state              &rarr; { pose, goal, obstacles, ... }
+POST /api/motor   { vx, vy, omega, duration }
+POST /api/log     { message }
+GET  /api/calibration?camera=top_down &rarr; saved mapping or null
+POST /api/calibration { camera, calibration }   &rarr; write a skill file</code></pre>
+        </details>
+      </aside>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

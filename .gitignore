@@ -1,0 +1,11 @@
+.env
+node_modules/
+npm-debug.log*
+server.log
+server.err.log
+*.webm
+*.mp4
+.tmp-edge-cdp/
+
+# Agent-generated calibration skill files
+calibration/

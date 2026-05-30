@@ -1,0 +1,413 @@
+:root {
+  color-scheme: light;
+  --bg: #fefdf8;
+  --panel: #ffffff;
+  --ink: #1e293b;
+  --ink-soft: #475569;
+  --ink-muted: #94a3b8;
+  --border: #e2e8f0;
+  --accent: #f97316;
+  --vision: #3b82f6;
+  --language: #22c55e;
+  --code-bg: #f8f4e3;
+  --shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+}
+
+* { box-sizing: border-box; }
+
+/* Buttons and form controls do not inherit the page font by default,
+   which made tab/button labels render in the browser's default face. */
+button, input, textarea, select { font-family: inherit; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--ink-soft);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  height: 100vh;
+  gap: 0;
+}
+
+.scene-shell {
+  position: relative;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+#scene {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  pointer-events: auto;
+}
+
+/* Scene overlay badge that flashes while the car is actually moving. */
+.motion-badge {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(59, 130, 246, 0.95);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+  display: none;
+  pointer-events: none;
+  z-index: 5;
+}
+.motion-badge.on { display: block; animation: motionPulse 1s ease-in-out infinite; }
+@keyframes motionPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.hud.top-left {
+  top: 1rem;
+  left: 1rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+
+.hud.top-left .title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.25rem;
+  color: #f8fafc;
+}
+
+.hud.top-left .subtitle {
+  font-size: 0.72rem;
+  color: rgba(248, 250, 252, 0.55);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hud.top-right {
+  top: 1rem;
+  right: 1rem;
+  flex-direction: row;
+  gap: 0.6rem;
+}
+
+.camera-switch {
+  display: flex;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.camera-switch button {
+  background: transparent;
+  color: rgba(248, 250, 252, 0.6);
+  border: 0;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.camera-switch button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.camera-switch button:hover:not(.active) {
+  color: white;
+}
+
+button.ghost {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(248, 250, 252, 0.85);
+  padding: 0.4rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button.ghost:hover { color: white; border-color: rgba(255, 255, 255, 0.25); }
+
+.camera-feed-overlay {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.camera-feed-overlay .label {
+  font-size: 0.7rem;
+  color: rgba(248, 250, 252, 0.6);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 0.2rem;
+}
+
+.camera-feed-overlay canvas {
+  width: 280px;
+  height: 158px;
+  background: #000;
+  border-radius: 8px;
+  display: block;
+}
+
+.panel {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* Keep flex children at their natural height; let the panel scroll instead of
+   squashing items. Without this, the stage tabs collapsed to a few pixels and
+   their labels were clipped. */
+.panel > * { flex-shrink: 0; }
+
+.panel-header { display: flex; flex-direction: column; gap: 0.3rem; }
+.panel-header .kicker { margin: 0; font-size: 0.7rem; color: var(--ink-muted); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+.panel-header h1 { margin: 0; font-family: "Instrument Serif", Georgia, serif; font-style: italic; font-size: 1.5rem; line-height: 1.2; color: var(--ink); font-weight: 400; }
+.panel-header .sub { font-size: 0.82rem; color: var(--ink-soft); line-height: 1.5; margin-top: 0.3rem; }
+
+label {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+textarea {
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: #fbfaf3;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  min-height: 110px;
+  resize: vertical;
+  color: var(--ink);
+  outline: none;
+}
+
+textarea:focus { border-color: var(--accent); }
+
+/* World controls, grouped in the panel so they never crowd the 3D view. */
+.scene-controls { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.scene-controls button {
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.32rem 0.75rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.scene-controls button:hover { background: #e2e8f0; }
+#forgetCalibrationBtn { color: #b45309; background: #fffbeb; border-color: #fcd34d; }
+#forgetCalibrationBtn:hover { background: #fef3c7; }
+#resetBtn { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+#resetBtn:hover { background: #fee2e2; }
+
+/* Per-camera calibration status. A pill turns solid green once that camera
+   has a saved calibration "skill" file; gray otherwise. */
+.calib-status { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.calib-label { font-size: 0.72rem; font-weight: 700; color: var(--ink-soft); letter-spacing: 0.04em; text-transform: uppercase; margin-right: 0.1rem; }
+.calib-pill {
+  font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px;
+  background: #f1f5f9; color: var(--ink-muted); border: 1px solid var(--border);
+}
+.calib-pill.done { background: #dcfce7; color: #15803d; border-color: #86efac; }
+
+/* Live "what is the agent doing right now" status card. */
+.agent-status {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  background: #f8fafc;
+}
+.status-line { display: flex; align-items: center; gap: 0.5rem; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--ink-muted); flex: 0 0 auto;
+}
+.status-text { font-size: 0.9rem; font-weight: 700; color: var(--ink); }
+.status-stage {
+  margin-left: auto; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em;
+  padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: #e2e8f0; color: var(--ink-soft);
+}
+/* Reserve a fixed three-line block so the panel never jumps as the status
+   text changes between one, two, and three lines. */
+.status-sub {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  margin-top: 0.35rem;
+  line-height: 1.4;
+  height: calc(0.76rem * 1.4 * 3);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+/* Status states: drive both the dot color and a soft pulse. */
+.agent-status.is-idle    .status-dot { background: #94a3b8; }
+.agent-status.is-waiting .status-dot { background: #f59e0b; animation: dotPulse 1.1s ease-in-out infinite; }
+.agent-status.is-working .status-dot { background: #22c55e; animation: dotPulse 0.9s ease-in-out infinite; }
+.agent-status.is-moving  .status-dot { background: #3b82f6; animation: dotPulse 0.7s ease-in-out infinite; }
+.agent-status.is-waiting { border-color: #fcd34d; background: #fffbeb; }
+.agent-status.is-working { border-color: #86efac; background: #f0fdf4; }
+.agent-status.is-moving  { border-color: #93c5fd; background: #eff6ff; }
+.agent-status.is-execute .status-stage { background: var(--accent); color: #ffffff; }
+.agent-status.is-calibrate .status-stage { background: var(--vision); color: #ffffff; }
+@keyframes dotPulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.6; } }
+
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mode-toggle button {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 0.6rem 0.5rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.mode-toggle button:not(.active):hover {
+  background: #f1f5f9;
+}
+
+.mode-toggle button.active {
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.hint { font-size: 0.78rem; color: var(--ink-soft); margin: -0.4rem 0 0 0; line-height: 1.45; }
+.hint code { background: var(--code-bg); padding: 0 0.25rem; border-radius: 3px; font-family: "JetBrains Mono", monospace; font-size: 0.78rem; }
+
+.quick { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.quick button {
+  background: #f1f5f9;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.quick button:hover { background: #e2e8f0; }
+
+button.primary {
+  background: var(--ink);
+  color: white;
+  border: 0;
+  padding: 0.7rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.primary:hover { background: #0f172a; }
+button.primary:disabled { opacity: 0.55; cursor: progress; }
+
+.log {
+  list-style: none;
+  padding: 0.5rem 0.7rem;
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  min-height: 150px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.log li { padding: 2px 0; }
+.log li .src-teacher { color: var(--language); }
+.log li .src-agent { color: var(--accent); }
+.log li .ts { color: rgba(226, 232, 240, 0.4); margin-right: 0.5rem; }
+
+.api { background: #fbfaf3; border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; }
+.api summary { font-size: 0.78rem; color: var(--ink-soft); cursor: pointer; font-weight: 600; }
+.api pre { margin: 0.5rem 0 0 0; font-size: 0.72rem; }
+.api code { font-family: "JetBrains Mono", monospace; color: var(--ink); white-space: pre-wrap; }
+.api-note { font-size: 0.74rem; color: var(--ink-soft); line-height: 1.5; margin: 0.5rem 0 0 0; }
+
+/* ---- "How this works" guide ---- */
+.guide { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px; padding: 0.6rem 0.8rem; }
+.guide summary { font-size: 0.82rem; font-weight: 700; color: #075985; cursor: pointer; }
+.guide-steps { margin: 0.6rem 0 0.4rem 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.guide-steps li { font-size: 0.78rem; color: var(--ink-soft); line-height: 1.45; }
+.guide-steps strong { color: var(--ink); }
+.guide-steps code { background: var(--code-bg); padding: 0 0.25rem; border-radius: 3px; font-family: "JetBrains Mono", monospace; font-size: 0.74rem; }
+.guide-note { font-size: 0.74rem; color: var(--ink-soft); line-height: 1.45; margin: 0.3rem 0 0 0; }
+
+/* ---- instruction "loads automatically" note ---- */
+.auto-note { font-weight: 400; font-size: 0.7rem; color: var(--ink-muted); margin-left: 0.4rem; text-transform: none; letter-spacing: 0; }
+
+/* ---- Agent working directory (calibration skill files) ---- */
+.workdir { border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem 0.75rem; background: #fbfaf3; }
+.workdir-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.workdir-title { font-size: 0.82rem; font-weight: 700; color: var(--ink); }
+.workdir-path { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--ink-soft); background: #fff; border: 1px solid var(--border); border-radius: 4px; padding: 0 0.3rem; }
+.workdir-hint { font-size: 0.72rem; color: var(--ink-soft); line-height: 1.45; margin: 0.35rem 0 0.5rem 0; }
+.file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.file-empty { font-size: 0.74rem; color: var(--ink-muted); font-style: italic; padding: 0.2rem 0; }
+.file-item { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.file-item:hover { border-color: var(--accent); background: #fffdf8; }
+.file-item.open { border-color: var(--accent); background: #fff7ed; }
+.file-name { font-family: "JetBrains Mono", monospace; font-size: 0.76rem; color: var(--ink); }
+.file-size { font-size: 0.7rem; color: var(--ink-muted); flex: 0 0 auto; }
+.file-view { margin: 0.5rem 0 0 0; padding: 0.6rem 0.7rem; background: #0f172a; color: #e2e8f0; border-radius: 8px; font-family: "JetBrains Mono", monospace; font-size: 0.72rem; line-height: 1.5; white-space: pre-wrap; max-height: 220px; overflow: auto; }
