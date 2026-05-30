@@ -258,7 +258,9 @@ const state = {
   lastAgentActivityMs: -1e9, // perf-clock time of the last agent log/motor
   awaitingPickup: false,     // instruction sent, agent has not acted yet
   lastSentMs: 0,
-  agentSeenAgoMs: null       // ms since the agent last hit any API (null = never)
+  agentSeenAgoMs: null,       // ms since the agent last hit any API (null = never)
+  agentWorkAgoMs: null,       // ms since the agent last did real work (frame/motor/log/calib)
+  activeCameraCalibrated: false
 };
 
 function stepPhysics(dt) {
@@ -327,6 +329,10 @@ async function pollMotorQueue() {
       refreshCalibFiles();
     }
     state.agentSeenAgoMs = (typeof body.agentSeenAgoMs === "number") ? body.agentSeenAgoMs : null;
+    state.agentWorkAgoMs = (typeof body.agentWorkAgoMs === "number") ? body.agentWorkAgoMs : null;
+    if (Array.isArray(body.calibratedCameras)) {
+      state.activeCameraCalibrated = body.calibratedCameras.includes(body.activeCamera || state.activeCamera);
+    }
     if (typeof body.obstaclesSeq === "number" && body.obstaclesSeq !== state.obstaclesSeq && Array.isArray(body.obstacles)) {
       state.obstaclesSeq = body.obstaclesSeq;
       // server obstacle.y maps to renderer z
@@ -641,10 +647,16 @@ function fmtCmd(c) {
 function renderStatus() {
   const now = performance.now();
   const moving = !!state.current || state.pending.length > 0;
-  const working = (now - state.lastAgentActivityMs) < AGENT_ACTIVE_WINDOW_MS;
   const queued = state.pending.length + (state.current ? 1 : 0);
-  // The agent is "connected" if it hit any endpoint recently (it polls ~2s).
-  const agentPresent = state.agentSeenAgoMs != null && state.agentSeenAgoMs < 10000;
+  // Actively doing work (read a frame / moved / logged / saved) very recently.
+  const working = state.agentWorkAgoMs != null && state.agentWorkAgoMs < 6000;
+  // Connected if it hit ANY endpoint recently, including idle instruction polls.
+  const connected = state.agentSeenAgoMs != null && state.agentSeenAgoMs < 10000;
+  const awaitSecs = Math.max(0, Math.round((now - state.lastSentMs) / 1000));
+  // "Thinking" only counts for a short grace window after Send. After that, if
+  // no work has happened, the agent has picked up and chosen not to act (often
+  // the task is already done), so we settle instead of saying "thinking" forever.
+  const justSent = state.awaitingPickup && (now - state.lastSentMs) < 12000;
 
   let mode;        // drives the colored state
   let text;
@@ -659,22 +671,26 @@ function renderStatus() {
   } else if (working) {
     mode = "working";
     text = "Agent working";
-    sub = "Reading the camera and thinking. Watch the log below; the car moves when a motor command arrives.";
-  } else if (state.awaitingPickup) {
-    const secs = Math.max(0, Math.round((now - state.lastSentMs) / 1000));
-    if (agentPresent) {
-      mode = "working";
-      text = "Agent thinking";
-      sub = `Instruction picked up ${secs}s ago. The agent is connected and reasoning; no motor command yet.`;
-    } else {
-      mode = "waiting";
-      text = "No agent detected";
-      sub = `Instruction sent ${secs}s ago, but nothing has polled the API. Start the sister Claude Code terminal with CLAUDE_AGENT_BRIEF.md.`;
-    }
-  } else if (agentPresent) {
+    sub = "Reading the camera and acting. Watch the log below; the car moves when a motor command arrives.";
+  } else if (justSent && connected) {
     mode = "working";
+    text = "Agent thinking";
+    sub = `Instruction picked up ${awaitSecs}s ago. The agent is connected and reasoning; no motor command yet.`;
+  } else if (justSent && !connected) {
+    mode = "waiting";
+    text = "No agent detected";
+    sub = `Instruction sent ${awaitSecs}s ago, but nothing has polled the API. Start the sister Claude Code terminal with CLAUDE_AGENT_BRIEF.md.`;
+  } else if (connected) {
+    // Connected but not working: idle, or it picked up and decided the task is
+    // already satisfied. Settle awaitingPickup so we stop showing "thinking".
+    state.awaitingPickup = false;
+    mode = "idle";
     text = "Agent connected";
-    sub = "The agent is polling for an instruction. Edit the instruction and click Send.";
+    if (state.stage === "calibrate" && state.activeCameraCalibrated) {
+      sub = "This camera is already calibrated. Switch cameras to calibrate another, Forget calibration to redo it, or go to Execute.";
+    } else {
+      sub = "The agent is connected and polling. Edit the instruction and click Send.";
+    }
   } else {
     mode = "idle";
     text = "Idle";

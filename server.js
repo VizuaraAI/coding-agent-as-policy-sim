@@ -149,8 +149,13 @@ let calibrationSeq = 0;
 // during the agent's silent reasoning gaps. The browser viewer never hits these
 // endpoints, so they attribute cleanly to the coding agent.
 let agentLastSeenTs = 0;
+let agentLastWorkTs = 0;
 let lastCameraLogTs = 0;
+// Heartbeat: any agent HTTP call, including idle instruction polls.
 function markAgent() { agentLastSeenTs = Date.now(); }
+// Real work: the agent read a frame, sent a motor command, logged, or saved a
+// calibration. Lets the UI tell "actively working" from "connected but idle".
+function markWork() { agentLastWorkTs = Date.now(); agentLastSeenTs = agentLastWorkTs; }
 
 function loadCalibrationFromDisk() {
   const loaded = { top_down: null, chase: null, front: null };
@@ -311,7 +316,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Only the coding agent reads the camera, so narrate it (throttled so a
       // tight read loop does not flood the log).
-      markAgent();
+      markWork();
       const nowTs = Date.now();
       if (nowTs - lastCameraLogTs > 1200) {
         lastCameraLogTs = nowTs;
@@ -333,7 +338,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/motor") {
-      markAgent();
+      markWork();
       const body = await readBody(req);
       const cmd = {
         seq: ++state.motorSeq,
@@ -432,7 +437,7 @@ const server = http.createServer(async (req, res) => {
     // ===== Calibration "skill" files =====
 
     if (req.method === "GET" && url.pathname === "/api/calibration") {
-      markAgent();
+      markWork();
       const camera = url.searchParams.get("camera");
       if (camera && VALID_CAMERAS.includes(camera) && calibration[camera] != null) {
         appendLog("agent", `Loaded saved calibration for the ${camera.replace("_", "-")} camera.`);
@@ -447,7 +452,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/calibration") {
-      markAgent();
+      markWork();
       const body = await readBody(req);
       const camera = body.camera;
       if (!VALID_CAMERAS.includes(camera)) { json(res, 400, { error: "camera must be 'top_down', 'chase', or 'front'" }); return; }
@@ -524,7 +529,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/log") {
       const body = await readBody(req);
       const src = body.source === "teacher" ? "teacher" : "agent";
-      if (src === "agent") markAgent();
+      if (src === "agent") markWork();
       appendLog(src, body.message || "");
       json(res, 200, { ok: true });
       return;
@@ -563,7 +568,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/internal/motor-queue") {
       const drained = state.motorQueue;
       state.motorQueue = [];
-      json(res, 200, { commands: drained, activeCamera: state.activeCamera, cameraSwitchSeq: state.cameraSwitchSeq, resetSeq: state.resetSeq, goal: state.goal, goalSeq: state.goalSeq, carSpawn: state.carSpawn, carSpawnSeq: state.carSpawnSeq, obstacles: state.obstacles, obstaclesSeq: state.obstaclesSeq, calibratedCameras: calibratedCameras(), calibrationSeq, agentSeenAgoMs: agentLastSeenTs ? (Date.now() - agentLastSeenTs) : null });
+      json(res, 200, { commands: drained, activeCamera: state.activeCamera, cameraSwitchSeq: state.cameraSwitchSeq, resetSeq: state.resetSeq, goal: state.goal, goalSeq: state.goalSeq, carSpawn: state.carSpawn, carSpawnSeq: state.carSpawnSeq, obstacles: state.obstacles, obstaclesSeq: state.obstaclesSeq, calibratedCameras: calibratedCameras(), calibrationSeq, agentSeenAgoMs: agentLastSeenTs ? (Date.now() - agentLastSeenTs) : null, agentWorkAgoMs: agentLastWorkTs ? (Date.now() - agentLastWorkTs) : null });
       return;
     }
 
