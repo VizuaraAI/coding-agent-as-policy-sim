@@ -17,7 +17,7 @@
 // ============================================================
 
 const BASE = process.env.SIM_URL || "http://127.0.0.1:8088";
-const LOOP_MS = 600;
+const LOOP_MS = 350;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (a) => Math.atan2(Math.sin(a), Math.cos(a)); // wrap to [-pi, pi]
@@ -81,24 +81,49 @@ let holding = false;       // for logging only: avoids spamming "reached"
 let lastPoseKey = null;    // detect a frozen car (no physics / tab not focused)
 let stuckCount = 0;
 let stuckWarned = false;
+let escapeDir = 0;         // remembered strafe direction while escaping a jam
+let aroundSign = 0;        // locked go-around side, so it commits instead of oscillating
+
+// Geometry: the car's collision radius (matches the sim) and how much clear
+// space we insist on keeping around every box.
+const CAR_R = 0.22;
+const STANDOFF = 0.60;     // keep the car's CENTER at least this far from a box edge
+const INFLUENCE = 1.50;    // start steering away once a box edge is within this
+const HARD = 0.45;         // below this clearance, strafe out instead of pushing in
+
+// Clearance from a point to the nearest edge of an axis-aligned box, plus the
+// outward unit direction (from the box, pointing toward the car). Using the box
+// EDGE (not the center) is what makes corners and long boxes safe.
+function boxClearance(px, py, o) {
+  const ex = Math.max(Math.abs(px - o.x) - o.w / 2, 0);
+  const ey = Math.max(Math.abs(py - o.y) - o.h / 2, 0);
+  const dist = Math.hypot(ex, ey);             // 0 if the point is over the box
+  let nx = px - o.x, ny = py - o.y;            // outward direction (from center)
+  const nl = Math.hypot(nx, ny) || 1;
+  return { dist, nx: nx / nl, ny: ny / nl };
+}
 
 async function driveStep() {
   const s = await get("/api/state");
 
-  // If the car has not moved across recent commands, the browser physics is not
-  // running (tab closed or backgrounded). Back off instead of spamming motors.
+  // If the car has not moved across recent commands it is either jammed against
+  // a box or the browser physics is paused (tab backgrounded). Warn once, then
+  // strafe sideways to slide off the obstacle rather than keep pushing into it.
   const key = `${s.pose.x.toFixed(3)},${s.pose.y.toFixed(3)},${s.pose.theta.toFixed(3)}`;
   if (key === lastPoseKey) {
     if (++stuckCount >= 3) {
       if (!stuckWarned) {
-        await log("Car is not responding to commands. Open and FOCUS the sim browser tab (it runs the physics).");
+        await log("Car not moving: nudging sideways to clear a box (and check the sim tab is focused, it runs the physics).");
         stuckWarned = true;
       }
-      return; // do not pile up commands while nothing is moving
+      if (escapeDir === 0) escapeDir = Math.random() < 0.5 ? 1 : -1;
+      await motor(0, escapeDir * 0.8, escapeDir * 0.6, 0.4); // strafe + turn out
+      return;
     }
   } else {
     stuckCount = 0;
     stuckWarned = false;
+    escapeDir = 0;
     lastPoseKey = key;
   }
 
@@ -111,27 +136,65 @@ async function driveStep() {
   }
   if (holding) { await log("Goal or car changed. Driving to the goal."); holding = false; }
 
-  // Potential field: attraction toward the goal plus repulsion from any nearby
-  // obstacle, so the car steers around the gray boxes instead of into them.
-  let ax = dx / dist, ay = dy / dist;          // unit attraction
+  // Potential field: unit attraction to the goal + strong, short-range repulsion
+  // from the nearest EDGE of every box, so the car routes around the boxes.
+  const gx = dx / dist, gy = dy / dist;        // unit goal direction
+
+  // Find the nearest box, and LOCK a single go-around side for as long as any
+  // box is in range. Committing to one side is what stops the car oscillating
+  // left-right in front of an obstacle that sits between it and the goal.
+  let nearest = Infinity, nb = null;
   for (const o of (s.obstacles || [])) {
-    const ox = s.pose.x - o.x, oy = s.pose.y - o.y;
-    const od = Math.hypot(ox, oy);
-    const reach = Math.max(o.w, o.h) / 2 + 0.7; // influence radius around the box
-    if (od < reach && od > 1e-3) {
-      const strength = 1.6 * (reach - od) / reach; // stronger as it gets closer
-      ax += (ox / od) * strength;
-      ay += (oy / od) * strength;
+    const c = boxClearance(s.pose.x, s.pose.y, o);
+    if (c.dist < nearest) { nearest = c.dist; nb = c; }
+  }
+  if (nearest > INFLUENCE) {
+    aroundSign = 0;                            // clear of all boxes: release the lock
+  } else if (aroundSign === 0 && nb) {
+    const tx = -nb.ny, ty = nb.nx;             // pick the side that heads toward the goal
+    aroundSign = (tx * gx + ty * gy) >= 0 ? 1 : -1;
+  }
+
+  let ax = gx, ay = gy;                         // attraction toward the goal
+  for (const o of (s.obstacles || [])) {
+    const c = boxClearance(s.pose.x, s.pose.y, o);
+    if (c.dist < INFLUENCE) {
+      const ramp = (INFLUENCE - c.dist) / INFLUENCE;     // 0 far .. 1 at the edge
+      // Radial: push away from the nearest edge to hold the standoff.
+      const radial = 1.0 * ramp + (c.dist < STANDOFF ? 1.8 : 0);
+      ax += c.nx * radial; ay += c.ny * radial;
+      // Tangential: circulate AROUND the box using the LOCKED side, so the car
+      // sweeps consistently around it instead of flip-flopping at the centerline.
+      const tx = -c.ny, ty = c.nx;             // perpendicular to the outward normal
+      const tang = 2.4 * ramp;
+      ax += aroundSign * tx * tang; ay += aroundSign * ty * tang;
     }
   }
   const worldDir = Math.atan2(ay, ax);
   const targetTheta = -worldDir;               // car world heading is -theta
   const err = norm(targetTheta - s.pose.theta);
-  if (Math.abs(err) > 0.25) {
-    await motor(0, 0, clamp(2.0 * err, -1.5, 1.5), 0.3);
-  } else {
-    await motor(clamp(1.2 * dist, 0.35, 1.0), 0, clamp(1.0 * err, -0.6, 0.6), 0.4);
+
+  // One combined command per step so the car arcs continuously instead of
+  // stopping to turn: drive forward scaled by how much it already faces the safe
+  // direction, crawl when a box is near, and strafe out if it is right on an
+  // edge. This keeps it moving while holding the standoff.
+  const clearScale = clamp((nearest - CAR_R) / STANDOFF, 0.15, 1);
+  let forward = clamp(1.2 * dist, 0, 1.1) * clearScale * Math.max(0, Math.cos(err));
+  const omega = clamp(1.6 * err, -1.6, 1.6);
+  const vy = nearest < HARD ? (err >= 0 ? 1 : -1) * 0.6 * (HARD - nearest) / HARD : 0;
+
+  // Hard safety: never step TOWARD a box past the standoff. If the car's forward
+  // direction is closing on the nearest box, cap forward so this step cannot take
+  // the clearance below ~0.32. Turning and strafing are still allowed, so the car
+  // keeps making progress around the box but physically cannot drive into it.
+  if (nb && nearest < 0.9) {
+    const closing = -Math.cos(s.pose.theta) * nb.nx + Math.sin(s.pose.theta) * nb.ny;
+    if (closing > 0.05) {
+      const cap = Math.max(0, (nearest - 0.45) / (0.35 * closing)); // ~1 unit/s scale, 0.35s step
+      forward = Math.min(forward, cap);
+    }
   }
+  await motor(forward, vy, omega, 0.3);
 }
 
 async function main() {

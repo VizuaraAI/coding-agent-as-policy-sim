@@ -130,6 +130,35 @@ while stage is execute:
         back, then re-read state and correct.
 ```
 
+### Avoiding obstacles (do not clip the gray boxes)
+
+`GET /api/state` gives `obstacles` as axis-aligned boxes `{x, y, w, h}` in the
+same frame as the car pose and goal. The car has a body radius of about 0.22, so
+treat each box as if it were grown by ~0.4 on every side and stay outside that.
+
+The clearance from the car to a box edge is:
+
+```
+ex = max(abs(carx - ox) - w/2, 0)
+ey = max(abs(cary - oy) - h/2, 0)
+clearance = hypot(ex, ey)        # 0 means the car is over the box
+```
+
+Practical rules that keep it off the boxes:
+
+1. **Keep a standoff.** Never let `clearance` drop below ~0.4. If the straight
+   line to the goal passes near a box, aim first at a point off to the side of
+   the box, then at the goal.
+2. **Repel from the nearest edge.** Add a vector pointing from the nearest box
+   edge toward the car (scaled up as clearance shrinks) to your goal-attraction
+   vector, and head along the sum. Edge, not center, so corners are respected.
+3. **Crawl when close.** As clearance shrinks, cut `vx` and use a small
+   `duration`, then re-read the state. Do not send a long, fast command toward a
+   box.
+4. **If you stop moving, you are jammed.** When a motor command does not change
+   the pose, stop pushing forward; strafe sideways with `vy` and rotate to slide
+   off the box, then continue around it.
+
 > If you are running as a sister Claude Code terminal and execution feels slow,
 > run with reduced thinking in the execute stage. The calibrate stage benefits
 > from careful measurement; the execute stage is mostly applying numbers you
